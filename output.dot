@@ -1,0 +1,6 @@
+digraph {
+    entry: [shape=record,label=""]
+    then: [shape=record,label=""]
+    else: [shape=record,label=""]
+    end: [shape=record,label=""]
+}

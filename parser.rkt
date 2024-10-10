@@ -7,127 +7,115 @@
 
 (provide parse-llvm parse-function parse-basic-blocks find-block-by-label output-dot-file build-cfg)
 
-
 ;; Parse an LLVM instruction
 (define (parse-llvm line)
   (if (string-blank? line)  ;; Check for empty or blank lines
       #f  ;; Return #f for blank lines, which can be ignored later
       (begin
-        (printf "Processing line: ~a\n" line) ;; Log the line being processed
+        (printf "\nProcessing line: ~a\n" line) ;; Log the line being processed
 
         ;; Ignore lines with just curly braces
         (if (regexp-match? #px"^\\s*[{}]\\s*$" line)
-            (printf "Ignoring curly brace: ~a\n" line)  ;; Just log and skip curly brace
-            
-        ;; First check for each pattern using `regexp-match?`
-        (cond
-          ;; Match 'alloca' (e.g., "%ptr = alloca i32")
-          [(regexp-match? #px"^\\s*(%\\w+) = alloca (\\w+)$" line)
-           (printf "Matched alloca!\n")
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = alloca (\\w+)$" line)]
-                  [lhs (second matches)]
-                  [type (third matches)])
-             (printf "Extracted values: lhs=~a, type=~a\n" lhs type)
-             (LLVM-Instruction 'alloca (list lhs type)))]
+            (begin
+              (printf "Ignoring curly brace: ~a\n" line)  ;; Just log and skip curly brace
+              #f)  ;; Return #f for curly braces
 
-          ;; Match 'getelementpointer' (e.g., "%gep = getelementptr i32, i32* %ptr, i32 0")
-          [(regexp-match? #px"^\\s*(%\\w+) = getelementptr (.*)$" line)
-           (printf "Matched getelementpointer!\n")
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = getelementptr (.*)$" line)]
-                  [lhs (second matches)]
-                  [operands (third matches)])
-             (printf "Extracted values: lhs=~a, operands=~a\n" lhs operands)
-             (LLVM-Instruction 'getelementpointer (list lhs operands)))]
+            ;; Else, proceed to process the line
+            ;; First check for each pattern using `regexp-match?`
+            (cond
+              ;; Match 'alloca' (e.g., "%ptr = alloca i32")
+              [(regexp-match? #px"^\\s*(%\\w+) = alloca (\\w+)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = alloca (\\w+)$" line)]
+                      [lhs (second matches)]
+                      [type (third matches)])
+                 (LLVM-Instruction 'alloca (list lhs type)))]
 
-          ;; Match 'load' (e.g., "%val = load i32, i32* %ptr")
-          [(regexp-match? #px"^\\s*(%\\w+) = load (.*)$" line)
-           (printf "Matched load!\n")
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = load (.*)$" line)]
-                  [lhs (second matches)]
-                  [operands (third matches)])
-             (printf "Extracted values: lhs=~a, operands=~a\n" lhs operands)
-             (LLVM-Instruction 'load (list lhs operands)))]
+              ;; Match 'getelementpointer' (e.g., "%gep = getelementptr i32, i32* %ptr, i32 0")
+              [(regexp-match? #px"^\\s*(%\\w+) = getelementptr (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = getelementptr (.*)$" line)]
+                      [lhs (second matches)]
+                      [operands (third matches)])
+                 (LLVM-Instruction 'getelementpointer (list lhs operands)))]
 
-          ;; Match 'store' (e.g., "store i32 %val, i32* %ptr")
-          [(regexp-match? #px"^\\s*store (.*)$" line)
-           (printf "Matched store!\n")
-           (let* ([matches (regexp-match #px"^\\s*store (.*)$" line)]
-                  [operands (second matches)])
-             (printf "Extracted values: operands=~a\n" operands)
-             (LLVM-Instruction 'store (list operands)))]
+              ;; Match 'load' (e.g., "%val = load i32, i32* %ptr")
+              [(regexp-match? #px"^\\s*(%\\w+) = load (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = load (.*)$" line)]
+                      [lhs (second matches)]
+                      [operands (third matches)])
+                 (LLVM-Instruction 'load (list lhs operands)))]
 
-          ;; Match 'ret' (e.g., "ret i32 %val")
-          [(regexp-match? #px"^\\s*ret (.*)$" line)
-           (printf "Matched ret!\n")
-           (let* ([matches (regexp-match #px"^\\s*ret (.*)$" line)]
-                  [operands (second matches)])
-             (printf "Extracted values: operands=~a\n" operands)
-             (LLVM-Instruction 'ret (list operands)))]
+              ;; Match 'store' (e.g., "store i32 %val, i32* %ptr")
+              [(regexp-match? #px"^\\s*store (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*store (.*)$" line)]
+                      [operands (second matches)])
+                 (LLVM-Instruction 'store (list operands)))]
 
-          ;; Match 'icmp' (e.g., "%cmp = icmp eq i32 %argc, 1")
-          [(regexp-match? #px"^\\s*(%\\w+) = icmp (\\w+) (\\w+) (%\\w+), (%\\w+|\\d+)$" line)
-           (printf "Matched icmp!\n")
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = icmp (\\w+) (\\w+) (%\\w+), (%\\w+|\\d+)$" line)]
-                  [lhs (second matches)]
-                  [cond (third matches)]
-                  [type (fourth matches)]
-                  [op1 (fifth matches)]
-                  [op2 (sixth matches)])
-             (printf "Extracted values: lhs=~a, cond=~a, type=~a, op1=~a, op2=~a\n" lhs cond type op1 op2)
-             (LLVM-Instruction 'icmp (list lhs cond type op1 op2)))]
+              ;; Match 'ret' (e.g., "ret i32 %val")
+              [(regexp-match? #px"^\\s*ret (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*ret (.*)$" line)]
+                      [operands (second matches)])
+                 (LLVM-Instruction 'ret (list operands)))]
 
-          ;; Match 'br' (e.g., "br i1 %cmp, label %then, label %else")
-          [(regexp-match? #px"^\\s*br (.*)$" line)
-           (printf "Matched br!\n")
-           (let* ([matches (regexp-match #px"^\\s*br (.*)$" line)]
-                  [operands (second matches)])
-             (printf "Extracted values: operands=~a\n" operands)
-             (LLVM-Instruction 'br (list operands)))]
+              ;; Match 'icmp' (e.g., "%cmp = icmp eq i32 %argc, 1")
+              [(regexp-match? #px"^\\s*(%\\w+) = icmp (\\w+) (\\w+) (%\\w+), (%\\w+|\\d+)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = icmp (\\w+) (\\w+) (%\\w+), (%\\w+|\\d+)$" line)]
+                      [lhs (second matches)]
+                      [cond (third matches)]
+                      [type (fourth matches)]
+                      [op1 (fifth matches)]
+                      [op2 (sixth matches)])
+                 (LLVM-Instruction 'icmp (list lhs cond type op1 op2)))]
 
-          ;; Match 'sub', 'div', 'mul', 'add'
-          [(regexp-match? #px"^\\s*(%\\w+) = (add|sub|div|mul) (\\w+) (%\\w+|\\d+), (%\\w+|\\d+)$" line)
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = (add|sub|div|mul) (\\w+) (%\\w+|\\d+), (%\\w+|\\d+)$" line)]
-                  [lhs (string->symbol (second matches))]
-                  [opcode (string->symbol (third matches))]
-                  [type (string->symbol (fourth matches))]
-                  [op1 (string->symbol (fifth matches))]
-                  [op2 (string->symbol (sixth matches))])
-             (printf "Matched ~a!\n" opcode)
-             (printf "Extracted values: lhs=~a, type=~a, op1=~a, op2=~a\n" lhs type op1 op2)
-             (LLVM-Instruction opcode (list lhs type op1 op2)))]
+              ;; Match conditional 'br' instruction
+              [(regexp-match? #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)
+               (let* ([matches (regexp-match #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)]
+                      [cond-type (second matches)]
+                      [cond-var (third matches)]
+                      [label-true (fourth matches)]
+                      [label-false (fifth matches)])
+                 (LLVM-Instruction 'br (list cond-type cond-var label-true label-false)))]
 
+              ;; Match unconditional 'br' instruction
+              [(regexp-match? #px"^\\s*br\\s+label\\s+(%\\w+)$" line)
+               (let* ([matches (regexp-match #px"^\\s*br\\s+label\\s+(%\\w+)$" line)]
+                      [label (second matches)])
+                 (LLVM-Instruction 'br (list label)))]
 
-          ;; Match 'phi' (e.g., "%res = phi i32 [%val1, %then], [%val2, %else]")
-          [(regexp-match? #px"^\\s*(%\\w+) = phi (.*)$" line)
-           (printf "Matched phi!\n")
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = phi (.*)$" line)]
-                  [lhs (second matches)]
-                  [operands (third matches)])
-             (printf "Extracted values: lhs=~a, operands=~a\n" lhs operands)
-             (LLVM-Instruction 'phi (list lhs operands)))]
+              ;; Match 'sub', 'div', 'mul', 'add'
+              [(regexp-match? #px"^\\s*(%\\w+) = (add|sub|div|mul) (\\w+) (%\\w+|\\d+), (%\\w+|\\d+)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = (add|sub|div|mul) (\\w+) (%\\w+|\\d+), (%\\w+|\\d+)$" line)]
+                      [lhs (second matches)]
+                      [opcode (third matches)]
+                      [type (fourth matches)]
+                      [op1 (fifth matches)]
+                      [op2 (sixth matches)])
+                 (LLVM-Instruction (string->symbol opcode) (list lhs type op1 op2)))]
 
-          ;; Match 'call' (e.g., "%result = call i32 @func(i32 %a)")
-          [(regexp-match? #px"^\\s*(%\\w+) = call (.*)$" line)
-           (printf "Matched call!\n")
-           (let* ([matches (regexp-match #px"^\\s*(%\\w+) = call (.*)$" line)]
-                  [lhs (second matches)]
-                  [operands (third matches)])
-             (printf "Extracted values: lhs=~a, operands=~a\n" lhs operands)
-             (LLVM-Instruction 'call (list lhs operands)))]
+              ;; Match 'phi' (e.g., "%res = phi i32 [%val1, %then], [%val2, %else]")
+              [(regexp-match? #px"^\\s*(%\\w+) = phi (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = phi (.*)$" line)]
+                      [lhs (second matches)]
+                      [operands (third matches)])
+                 (LLVM-Instruction 'phi (list lhs operands)))]
 
-          ;; Match 'define' (e.g., "define i32 @main(i32 %argc)")
-          [(regexp-match? #px"^\\s*define (.*)$" line)
-           (printf "Matched define!\n")
-           (let* ([matches (regexp-match #px"^\\s*define (.*)$" line)]
-                  [signature (second matches)])
-             (printf "Extracted signature: ~a\n" signature)
-             (LLVM-Instruction 'define (list signature)))]
+              ;; Match 'call' (e.g., "%result = call i32 @func(i32 %a)")
+              [(regexp-match? #px"^\\s*(%\\w+) = call (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = call (.*)$" line)]
+                      [lhs (second matches)]
+                      [operands (third matches)])
+                 (LLVM-Instruction 'call (list lhs operands)))]
 
-          ;; Handle unknown instruction with error logging
-          [else
-           (begin
-             (printf "Failed to match instruction: ~a\n" line) ;; Log the failed line
-             (error "Unknown instruction or format: ~a" line))])))))
+              ;; Match 'define' (e.g., "define i32 @main(i32 %argc)")
+              [(regexp-match? #px"^\\s*define (.*)$" line)
+               (let* ([matches (regexp-match #px"^\\s*define (.*)$" line)]
+                      [signature (second matches)])
+                 (LLVM-Instruction 'define (list signature)))]
+
+              ;; Handle unknown instruction with error logging
+              [else
+               (begin
+                 (printf "Failed to match instruction: ~a\n" line) ;; Log the failed line
+                 (error "Unknown instruction or format: ~a" line))])))))
 
 (define (string-blank? line)
   (or (not line) (regexp-match? #px"^\\s*$" line)))
@@ -138,54 +126,68 @@
   (define current-block-label #f)
   (define current-instructions '())
 
-  ;; Helper to finalize the current block
-  (define (finalize-block)
-    (when current-block-label
-      (printf "Finalizing block: ~a with instructions: ~a\n" current-block-label current-instructions)
-      (set! blocks (cons (BasicBlock current-block-label current-instructions '()) blocks))
-      (set! current-block-label #f)
-      (set! current-instructions '())))
+;; Helper to finalize the current block
+(define (finalize-block)
+  (when (and current-block-label (not (null? current-instructions)))
+    (printf "Finalizing block: ~a with instructions: ~a\n" current-block-label current-instructions)
+    (set! blocks (cons (BasicBlock current-block-label (reverse current-instructions) '()) blocks)))
+  ;; Reset the state variables outside the 'when' block
+  (set! current-block-label #f)
+  (set! current-instructions '()))
 
   ;; Process each line
-  (for ([line lines])
-    (printf "Processing line in basic block: ~a\n" line)
-    (cond
-      ;; If the line is a label (start of a block)
-      [(regexp-match #px"^(\\w+):$" line)
-       (finalize-block) ;; Finalize the previous block
-       (set! current-instructions '()) ;; Reset instructions for the new block
-       (set! current-block-label (car (regexp-match #px"^(\\w+):$" line)))
-       (printf "New block detected: ~a\n" line)]
+(for ([line lines])
+  (printf "Processing line in basic block: ~a\n" line)
+  (cond
+    ;; If the line is a label (start of a block)
+    [(regexp-match #px"^(\\w+):$" line)
+     (finalize-block) ;; Finalize the previous block
+     (set! current-instructions '()) ;; Reset instructions for the new block
+     (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))
+     (printf "New block detected: ~a\n" current-block-label)]
 
-      ;; If it's a control flow instruction (end of a block)
-      [(regexp-match #px"^(br|ret)\\b" line)
-       (define instruction (parse-llvm line))
-       (printf "Parsed control flow instruction: ~a\n" instruction)
-       (when (and instruction (not (void? instruction)))
-         (set! current-instructions (cons instruction current-instructions)))
-       (finalize-block)]
+    ;; If it's a control flow instruction (end of a block)
+    [(regexp-match #px"^\\s*(br|ret)\\b" line)
+     (define instruction (parse-llvm line))
+     (printf "Parsed control flow instruction: ~a\n" instruction)
+     (when (and instruction (not (void? instruction)))
+       (when (not current-block-label)
+         (set! current-block-label "entry"))
+       (set! current-instructions (cons instruction current-instructions)))
+     (finalize-block)]
 
-      ;; For other instructions
-      [else
-       (define instruction (parse-llvm line))
-       (printf "Parsed instruction: ~a\n" instruction)
-       (when (and instruction (not (void? instruction)))
-         (set! current-instructions (cons instruction current-instructions)))]))
+    ;; For other instructions
+    [else
+     (define instruction (parse-llvm line))
+     (printf "Parsed instruction: ~a\n" instruction)
+     (when (and instruction (not (void? instruction)))
+       (when (not current-block-label)
+         (set! current-block-label "entry"))
+       (set! current-instructions (cons instruction current-instructions)))]))
 
-  ;; Finalize the last block
-  (printf "Finalizing last block if any.\n")
-  (finalize-block)
-  (reverse blocks))
+  (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label blocks))
+
+
+;; Finalize the last block
+(printf "Finalizing last block if any.\n")
+(finalize-block)
+
+;; Print the blocks before reversing
+(printf "Blocks before reverse: ~a\n" blocks)
+
+(printf "Parsed basic blocks: ~a\n" (map BasicBlock-label (reverse blocks)))
+(reverse blocks))
+
 
 ;; Find a basic block by its label in a list of blocks
 (define (find-block-by-label label blocks)
   (define found-block
-    (for/fold ([result #f]) ([block blocks])
-      (if (equal? label (BasicBlock-label block))
-          block
-          result)))
+    (for/first ([block blocks] #:when (equal? label (BasicBlock-label block)))
+      block))  ;; Return the first matching block
   (if found-block
-      found-block
+      (begin
+        (printf "Found block for label ~a: ~a\n" label (BasicBlock-label found-block))
+        found-block)
       (error "Basic block with label ~a not found" label)))
 
 ;; Parse a single function from its lines
@@ -196,6 +198,10 @@
       (let* ([function-name (car lines)]        ;; The first line contains the function definition
              [function-body (cdr lines)]        ;; The remaining lines contain the function body
              [basic-blocks (parse-basic-blocks function-body)]) ;; Parse the basic blocks from the body
+
+        ;; Debug print statement to verify basic blocks
+        (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label basic-blocks))
+
         ;; Return a Function struct with the parsed name and basic blocks
         (Function function-name basic-blocks))))
 
@@ -207,110 +213,176 @@
 
     ;; Match the instruction type
     (match inst
+
+       [#f (printf "Found void instruction!\n")""]
+
       ;; Match 'alloca'
       [(LLVM-Instruction 'alloca `(,lhs ,type))
-       (printf "Matched alloca: lhs=~a, type=~a\n" lhs type)
        (format "~a = alloca ~a" lhs type)]
 
       ;; Match 'getelementpointer'
       [(LLVM-Instruction 'getelementpointer `(,lhs ,operands))
-       (printf "Matched getelementpointer: lhs=~a, operands=~a\n" lhs operands)
        (format "~a = getelementptr ~a" lhs operands)]
 
       ;; Match 'load'
       [(LLVM-Instruction 'load `(,lhs ,operands))
-       (printf "Matched load: lhs=~a, operands=~a\n" lhs operands)
        (format "~a = load ~a" lhs operands)]
 
       ;; Match 'store'
       [(LLVM-Instruction 'store `(,operands))
-       (printf "Matched store: operands=~a\n" operands)
        (format "store ~a" operands)]
 
       ;; Match 'ret'
       [(LLVM-Instruction 'ret `(,operands))
-       (printf "Matched ret: operands=~a\n" operands)
        (format "ret ~a" operands)]
 
       ;; Match 'icmp'
       [(LLVM-Instruction 'icmp `(,lhs ,cond ,type ,op1 ,op2))
-       (printf "Matched icmp: lhs=~a, cond=~a, type=~a, op1=~a, op2=~a\n" lhs cond type op1 op2)
        (format "~a = icmp ~a ~a, ~a, ~a" lhs cond type op1 op2)]
 
       ;; Match 'br'
-      [(LLVM-Instruction 'br `(,operands))
-       (printf "Matched br: operands=~a\n" operands)
-       (format "br ~a" operands)]
+      [(LLVM-Instruction 'br operands)
+       (format "br ~a" (string-join operands ", "))]
 
       ;; Match 'add', 'sub', 'div', 'mul' with string operands
       [(LLVM-Instruction (or 'add 'sub 'div 'mul) `(,lhs ,type ,op1 ,op2))
-       (printf "Matched ~a: lhs=~a, type=~a, op1=~a, op2=~a\n" (LLVM-Instruction-opcode inst) lhs type op1 op2)
        (format "~a = ~a ~a, ~a, ~a" lhs (symbol->string (LLVM-Instruction-opcode inst)) type op1 op2)]
 
       ;; Match 'phi'
       [(LLVM-Instruction 'phi `(,lhs ,operands))
-       (printf "Matched phi: lhs=~a, operands=~a\n" lhs operands)
        (format "~a = phi ~a" lhs operands)]
 
       ;; Match 'call'
       [(LLVM-Instruction 'call `(,lhs ,operands))
-       (printf "Matched call: lhs=~a, operands=~a\n" lhs operands)
        (format "~a = call ~a" lhs operands)]
 
       ;; Match 'define'
       [(LLVM-Instruction 'define `(,signature))
-       (printf "Matched define: signature=~a\n" signature)
        (format "define ~a" signature)]
 
       ;; Handle unknown instruction types
       [_ (begin
-           (printf "Error: Unknown LLVM instruction type encountered: ~a\n" inst)
+           (printf "\nError: Unknown LLVM instruction type encountered: ~a\n" inst)
            (error "Unknown LLVM instruction type: ~a" inst))])))
-
 
 ;; Build control-flow graph (CFG) from basic blocks
 (define (build-cfg function)
+  (printf "\nBuilding CFG for function: ~a\n" (Function-name function))
+  
   (for ([block (Function-basic-blocks function)])
-    (define successors '())
-    (define last-inst (car (reverse (BasicBlock-instructions block))))
+    (printf "Processing block: ~a\n" (BasicBlock-label block))
 
-    (match last-inst
-      [(LLVM-Instruction 'br operands)
-       (for ([label operands])
-         (set! successors (cons (find-block-by-label label (Function-basic-blocks function)) successors)))]
-      [(LLVM-Instruction 'ret _) 
-       (set! successors '())]
-      [_ #f])
-    (set-BasicBlock-successors! block successors))
-  function)
+    (define instructions (BasicBlock-instructions block))
+    (define successors '())
+
+    ;; Check if the block has instructions to avoid errors with 'last'
+    (if (null? instructions)
+        (printf "Block ~a has no instructions; skipping setting successors.\n"
+                (BasicBlock-label block))
+        (let ([last-inst (last instructions)]) ;; Use let instead of define
+          (printf "Last instruction in block ~a:: ~a\n"
+                  (BasicBlock-label block) last-inst)
+
+          (match last-inst
+            ;; If it's a branch instruction, extract the labels
+            [(LLVM-Instruction 'br operands)
+             (printf "\nProcessing branch instruction with operands: ~a\n" operands)
+             (cond
+               ;; Conditional branch
+               [(= (length operands) 4)
+                (let* ([label-true (substring (list-ref operands 2) 1)] ;; Remove '%' from label
+                       [label-false (substring (list-ref operands 3) 1)])
+                  (for ([label (list label-true label-false)])
+                    (let ([succ-block (find-block-by-label label (Function-basic-blocks function))])
+                      (when succ-block
+                        (printf "Adding successor block: ~a\n" (BasicBlock-label succ-block))
+                        (set! successors (cons succ-block successors))))))]
+               ;; Unconditional branch
+               [(= (length operands) 1)
+                (let ([label (substring (first operands) 1)]) ;; Remove '%' from label
+                  (let ([succ-block (find-block-by-label label (Function-basic-blocks function))])
+                    (when succ-block
+                      (printf "Adding successor block: ~a\n" (BasicBlock-label succ-block))
+                      (set! successors (cons succ-block successors)))))]
+               ;; Else
+               [else
+                (printf "Unknown branch instruction format: ~a\n" operands)]
+               ) ;; End of cond
+             ] ;; End of match case for 'br'
+
+            ;; Return instruction doesn't have successors
+            [(LLVM-Instruction 'ret _)
+             (printf "Return instruction: no successors for block ~a\n"
+                     (BasicBlock-label block))
+             (set! successors '())]
+
+            ;; Default case for any other instruction
+            [_ (printf "No successor for block ~a (other instruction)\n"
+                       (BasicBlock-label block))]
+            ) ;; End of match
+          )) ;; End of let and if
+
+    ;; Set the successors for the block
+    (printf "Setting successors for block ~a:: ~a\n"
+            (BasicBlock-label block)
+            (map BasicBlock-label successors))
+    (set-BasicBlock-successors! block successors)
+    ) ;; End of for loop body
+
+  function) ;; Return the function with updated CFG
+ ;; Return the function with updated CFG
+
+
 
 ;; Generate Graphviz dot content from CFG
 (define (generate-dot-content function)
+  (printf "Generating dot content for function: ~a\n" (Function-name function))
+
+  ;; Print the basic blocks
+  (printf "Function's basic blocks: ~a\n" (Function-basic-blocks function))
+
   (define dot-output "digraph {\n")
 
-  ;; For each basic block
-  (for ([block (Function-basic-blocks function)])
-    (define node-id (BasicBlock-label block))
+  ;; Assign node IDs to each basic block
+  (define block-ids
+    (for/list ([(block idx) (in-indexed (Function-basic-blocks function))])
+      (cons block (format "Node~a" idx))))
 
-    ;; Check if block has instructions
-    (define instructions
-      (if (null? (BasicBlock-instructions block))
-          "(no instructions)"
-          (string-join
-           (map LLVM-Instruction->string (BasicBlock-instructions block))
-           "\\n")))
+  ;; Debug: Print block-ids
+  (printf "block-ids: ~a\n" block-ids)
 
-    ;; Generate the node with the block label and instructions
-    (set! dot-output (string-append dot-output (format "    ~a [shape=record,label=\"~a|~a\"]\n" node-id node-id instructions)))
+  ;; For each basic block, generate a node
+  (for ([block-id block-ids])
+    (define block (car block-id))
+    (define node-id (cdr block-id))
+    (printf "Block-id: ~a\n" block-id)
+    (printf "Block: ~a\n" block)
+    (unless (BasicBlock? block)
+      (printf "Error: block is not a BasicBlock: ~a\n" block)
+      (error "Invalid block detected in generate-dot-content"))
+    (printf "Generating node for block: ~a with node-id: ~a\n" (BasicBlock-label block) node-id)
+
+    ;; Generate the node
+    (set! dot-output (string-append dot-output (format "    ~a [shape=record,label=\"~a\"]\n" node-id (BasicBlock-label block)))))
+
+  ;; Generate the edges based on successors
+  (for ([block-id block-ids])
+    (define block (car block-id))
+    (define node-id (cdr block-id))
+    (printf "Processing block ~a for successors\n" node-id)
 
     ;; Add edges to successor blocks
     (for ([succ (BasicBlock-successors block)] [i (in-naturals)])
-      (set! dot-output (string-append dot-output
-                                      (format "    ~a -> ~a [label=~a];\n" node-id (BasicBlock-label succ) i)))))
+      (define succ-id (assoc succ block-ids))
+      (if succ-id
+          (begin
+            (printf "Adding edge from ~a to ~a\n" node-id (cdr succ-id))
+            (set! dot-output (string-append dot-output
+                                            (format "    ~a -> ~a [label=~a];\n" node-id (cdr succ-id) i))))
+          (printf "No successor block found for block ~a\n" node-id))))
 
   ;; Close the digraph
   (set! dot-output (string-append dot-output "}\n"))
-
   dot-output)
 
 

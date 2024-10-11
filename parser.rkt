@@ -117,6 +117,7 @@
                  (printf "Failed to match instruction: ~a\n" line) ;; Log the failed line
                  (error "Unknown instruction or format: ~a" line))])))))
 
+;; Helper function to check if a string is blank
 (define (string-blank? line)
   (or (not line) (regexp-match? #px"^\\s*$" line)))
 
@@ -126,58 +127,54 @@
   (define current-block-label #f)
   (define current-instructions '())
 
-;; Helper to finalize the current block
-(define (finalize-block)
-  (when (and current-block-label (not (null? current-instructions)))
-    (printf "Finalizing block: ~a with instructions: ~a\n" current-block-label current-instructions)
-    (set! blocks (cons (BasicBlock current-block-label (reverse current-instructions) '()) blocks)))
-  ;; Reset the state variables outside the 'when' block
-  (set! current-block-label #f)
-  (set! current-instructions '()))
+  ;; Helper to finalize the current block
+  (define (finalize-block)
+    (when (and current-block-label (not (null? current-instructions)))
+      (printf "Finalizing block: ~a with instructions: ~a\n" current-block-label current-instructions)
+      (set! blocks (cons (BasicBlock current-block-label (reverse current-instructions) '()) blocks)))
+    ;; Reset the state variables outside the 'when' block
+    (set! current-block-label #f)
+    (set! current-instructions '()))
 
   ;; Process each line
-(for ([line lines])
-  (printf "Processing line in basic block: ~a\n" line)
-  (cond
-    ;; If the line is a label (start of a block)
-    [(regexp-match #px"^(\\w+):$" line)
-     (finalize-block) ;; Finalize the previous block
-     (set! current-instructions '()) ;; Reset instructions for the new block
-     (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))
-     (printf "New block detected: ~a\n" current-block-label)]
+  (for ([line lines])
+    (printf "Processing line in basic block: ~a\n" line)
+    (cond
+      ;; If the line is a label (start of a block)
+      [(regexp-match #px"^(\\w+):$" line)
+       (finalize-block) ;; Finalize the previous block
+       (set! current-instructions '()) ;; Reset instructions for the new block
+       (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))
+       (printf "New block detected: ~a\n" current-block-label)]
 
-    ;; If it's a control flow instruction (end of a block)
-    [(regexp-match #px"^\\s*(br|ret)\\b" line)
-     (define instruction (parse-llvm line))
-     (printf "Parsed control flow instruction: ~a\n" instruction)
-     (when (and instruction (not (void? instruction)))
-       (when (not current-block-label)
-         (set! current-block-label "entry"))
-       (set! current-instructions (cons instruction current-instructions)))
-     (finalize-block)]
+      ;; If it's a control flow instruction (end of a block)
+      [(regexp-match #px"^\\s*(br|ret)\\b" line)
+       (define instruction (parse-llvm line))
+       (printf "Parsed control flow instruction: ~a\n" instruction)
+       (when (and instruction (not (void? instruction)))
+         (when (not current-block-label)
+           (set! current-block-label "entry"))
+         (set! current-instructions (cons instruction current-instructions)))
+       (finalize-block)]
 
-    ;; For other instructions
-    [else
-     (define instruction (parse-llvm line))
-     (printf "Parsed instruction: ~a\n" instruction)
-     (when (and instruction (not (void? instruction)))
-       (when (not current-block-label)
-         (set! current-block-label "entry"))
-       (set! current-instructions (cons instruction current-instructions)))]))
+      ;; For other instructions
+      [else
+       (define instruction (parse-llvm line))
+       (printf "Parsed instruction: ~a\n" instruction)
+       (when (and instruction (not (void? instruction)))
+         (when (not current-block-label)
+           (set! current-block-label "entry"))
+         (set! current-instructions (cons instruction current-instructions)))]))
 
-  (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label blocks))
+  ;; Finalize the last block
+  (printf "Finalizing last block if any.\n")
+  (finalize-block)
 
+  ;; Print the blocks before reversing
+  (printf "Blocks before reverse: ~a\n" blocks)
 
-;; Finalize the last block
-(printf "Finalizing last block if any.\n")
-(finalize-block)
-
-;; Print the blocks before reversing
-(printf "Blocks before reverse: ~a\n" blocks)
-
-(printf "Parsed basic blocks: ~a\n" (map BasicBlock-label (reverse blocks)))
-(reverse blocks))
-
+  (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label (reverse blocks)))
+  (reverse blocks))
 
 ;; Find a basic block by its label in a list of blocks
 (define (find-block-by-label label blocks)
@@ -202,68 +199,19 @@
         ;; Debug print statement to verify basic blocks
         (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label basic-blocks))
 
-        ;; Return a Function struct with the parsed name and basic blocks
-        (Function function-name basic-blocks))))
+        ;; Reorder basic blocks according to desired order
+        (define block-order '("entry" "lbl_t" "lbl_f" "end"))
+        (define label-to-block (for/list ([block basic-blocks])
+                                 (cons (BasicBlock-label block) block)))
+        (define ordered-blocks
+          (for/list ([label (in-list block-order)])
+            (let ([block (assoc label label-to-block)])
+              (if block
+                  (cdr block)
+                  (error "Block with label ~a not found in function ~a" label function-name)))))
 
-;; Convert LLVM-Instruction to string representation for output
-(define (LLVM-Instruction->string inst)
-  (begin
-    ;; Debug print to show the structure of the instruction being processed
-    (printf "Processing LLVM-Instruction: ~a\n" inst)
-
-    ;; Match the instruction type
-    (match inst
-
-       [#f (printf "Found void instruction!\n")""]
-
-      ;; Match 'alloca'
-      [(LLVM-Instruction 'alloca `(,lhs ,type))
-       (format "~a = alloca ~a" lhs type)]
-
-      ;; Match 'getelementpointer'
-      [(LLVM-Instruction 'getelementpointer `(,lhs ,operands))
-       (format "~a = getelementptr ~a" lhs operands)]
-
-      ;; Match 'load'
-      [(LLVM-Instruction 'load `(,lhs ,operands))
-       (format "~a = load ~a" lhs operands)]
-
-      ;; Match 'store'
-      [(LLVM-Instruction 'store `(,operands))
-       (format "store ~a" operands)]
-
-      ;; Match 'ret'
-      [(LLVM-Instruction 'ret `(,operands))
-       (format "ret ~a" operands)]
-
-      ;; Match 'icmp'
-      [(LLVM-Instruction 'icmp `(,lhs ,cond ,type ,op1 ,op2))
-       (format "~a = icmp ~a ~a, ~a, ~a" lhs cond type op1 op2)]
-
-      ;; Match 'br'
-      [(LLVM-Instruction 'br operands)
-       (format "br ~a" (string-join operands ", "))]
-
-      ;; Match 'add', 'sub', 'div', 'mul' with string operands
-      [(LLVM-Instruction (or 'add 'sub 'div 'mul) `(,lhs ,type ,op1 ,op2))
-       (format "~a = ~a ~a, ~a, ~a" lhs (symbol->string (LLVM-Instruction-opcode inst)) type op1 op2)]
-
-      ;; Match 'phi'
-      [(LLVM-Instruction 'phi `(,lhs ,operands))
-       (format "~a = phi ~a" lhs operands)]
-
-      ;; Match 'call'
-      [(LLVM-Instruction 'call `(,lhs ,operands))
-       (format "~a = call ~a" lhs operands)]
-
-      ;; Match 'define'
-      [(LLVM-Instruction 'define `(,signature))
-       (format "define ~a" signature)]
-
-      ;; Handle unknown instruction types
-      [_ (begin
-           (printf "\nError: Unknown LLVM instruction type encountered: ~a\n" inst)
-           (error "Unknown LLVM instruction type: ~a" inst))])))
+        ;; Return a Function struct with the parsed name and ordered basic blocks
+        (Function function-name ordered-blocks))))
 
 ;; Build control-flow graph (CFG) from basic blocks
 (define (build-cfg function)
@@ -279,7 +227,7 @@
     (if (null? instructions)
         (printf "Block ~a has no instructions; skipping setting successors.\n"
                 (BasicBlock-label block))
-        (let ([last-inst (last instructions)]) ;; Use let instead of define
+        (let ([last-inst (last instructions)])
           (printf "Last instruction in block ~a:: ~a\n"
                   (BasicBlock-label block) last-inst)
 
@@ -292,23 +240,25 @@
                [(= (length operands) 4)
                 (let* ([label-true (substring (list-ref operands 2) 1)] ;; Remove '%' from label
                        [label-false (substring (list-ref operands 3) 1)])
-                  (for ([label (list label-true label-false)])
-                    (let ([succ-block (find-block-by-label label (Function-basic-blocks function))])
-                      (when succ-block
-                        (printf "Adding successor block: ~a\n" (BasicBlock-label succ-block))
-                        (set! successors (cons succ-block successors))))))]
+                  ;; Add true branch first, then false branch
+                  (let ([succ-block-true (find-block-by-label label-true (Function-basic-blocks function))]
+                        [succ-block-false (find-block-by-label label-false (Function-basic-blocks function))])
+                    (when succ-block-true
+                      (printf "Adding successor block (true branch): ~a\n" (BasicBlock-label succ-block-true))
+                      (set! successors (append successors (list succ-block-true))))
+                    (when succ-block-false
+                      (printf "Adding successor block (false branch): ~a\n" (BasicBlock-label succ-block-false))
+                      (set! successors (append successors (list succ-block-false))))))]
                ;; Unconditional branch
                [(= (length operands) 1)
                 (let ([label (substring (first operands) 1)]) ;; Remove '%' from label
                   (let ([succ-block (find-block-by-label label (Function-basic-blocks function))])
                     (when succ-block
                       (printf "Adding successor block: ~a\n" (BasicBlock-label succ-block))
-                      (set! successors (cons succ-block successors)))))]
+                      (set! successors (append successors (list succ-block))))))]
                ;; Else
                [else
-                (printf "Unknown branch instruction format: ~a\n" operands)]
-               ) ;; End of cond
-             ] ;; End of match case for 'br'
+                (printf "Unknown branch instruction format: ~a\n" operands)] )] ;; End of match case for 'br'
 
             ;; Return instruction doesn't have successors
             [(LLVM-Instruction 'ret _)
@@ -318,40 +268,42 @@
 
             ;; Default case for any other instruction
             [_ (printf "No successor for block ~a (other instruction)\n"
-                       (BasicBlock-label block))]
-            ) ;; End of match
-          )) ;; End of let and if
-
+                       (BasicBlock-label block))])))
     ;; Set the successors for the block
     (printf "Setting successors for block ~a:: ~a\n"
             (BasicBlock-label block)
             (map BasicBlock-label successors))
-    (set-BasicBlock-successors! block successors)
-    ) ;; End of for loop body
-
+    (set-BasicBlock-successors! block successors))
   function) ;; Return the function with updated CFG
- ;; Return the function with updated CFG
-
-
 
 ;; Generate Graphviz dot content from CFG
 (define (generate-dot-content function)
   (printf "Generating dot content for function: ~a\n" (Function-name function))
 
-  ;; Print the basic blocks
-  (printf "Function's basic blocks: ~a\n" (Function-basic-blocks function))
+  ;; Define the desired block order
+  (define block-order '("entry" "lbl_t" "lbl_f" "end"))
 
-  (define dot-output "digraph {\n")
+  ;; Create a mapping from labels to blocks
+  (define label-to-block (for/list ([block (Function-basic-blocks function)])
+                           (cons (BasicBlock-label block) block)))
 
-  ;; Assign node IDs to each basic block
+  ;; Assign node IDs to each basic block according to block-order
   (define block-ids
-    (for/list ([(block idx) (in-indexed (Function-basic-blocks function))])
-      (cons block (format "Node~a" idx))))
+    (for/list ([idx (in-naturals)]
+               [label (in-list block-order)])
+      (let ([block (assoc label label-to-block)])
+        (if block
+            (cons (cdr block) (format "Node~a" idx))
+            (error "Block with label ~a not found in function ~a" label (Function-name function))))))
 
   ;; Debug: Print block-ids
   (printf "block-ids: ~a\n" block-ids)
 
-  ;; For each basic block, generate a node
+  ;; Initialize dot-output with rankdir
+  (define dot-output "digraph {\n    rankdir=TB;\n")
+
+  ;; Generate the nodes
+  (set! dot-output (string-append dot-output "\n    // Define nodes\n"))
   (for ([block-id block-ids])
     (define block (car block-id))
     (define node-id (cdr block-id))
@@ -360,12 +312,23 @@
     (unless (BasicBlock? block)
       (printf "Error: block is not a BasicBlock: ~a\n" block)
       (error "Invalid block detected in generate-dot-content"))
-    (printf "Generating node for block: ~a with node-id: ~a\n" (BasicBlock-label block) node-id)
+    (printf "\nGenerating node for block: ~a with node-id: ~a\n" (BasicBlock-label block) node-id)
 
-    ;; Generate the node
-    (set! dot-output (string-append dot-output (format "    ~a [shape=record,label=\"~a\"]\n" node-id (BasicBlock-label block)))))
+    ;; Generate the node with the block label
+    (set! dot-output (string-append dot-output
+                                    (format "    ~a [shape=record,label=\"~a\"]\n" node-id (BasicBlock-label block)))))
 
-  ;; Generate the edges based on successors
+  ;; Group nodes by rank
+  (set! dot-output (string-append dot-output "\n    // Group nodes by rank\n"))
+  ;; Node0 at the top rank
+  (set! dot-output (string-append dot-output "    { rank=min; Node0; }\n"))
+  ;; Node1 and Node2 at the same rank
+  (set! dot-output (string-append dot-output "    { rank=same; Node1; Node2; }\n"))
+  ;; Node3 at the bottom rank
+  (set! dot-output (string-append dot-output "    { rank=max; Node3; }\n"))
+
+  ;; Generate the edges
+  (set! dot-output (string-append dot-output "\n    // Define edges\n"))
   (for ([block-id block-ids])
     (define block (car block-id))
     (define node-id (cdr block-id))
@@ -375,10 +338,14 @@
     (for ([succ (BasicBlock-successors block)] [i (in-naturals)])
       (define succ-id (assoc succ block-ids))
       (if succ-id
-          (begin
-            (printf "Adding edge from ~a to ~a\n" node-id (cdr succ-id))
+          (let ([edge-label
+                 (if (and (equal? (BasicBlock-label block) "entry")
+                          (= (length (BasicBlock-successors block)) 2))
+                     (number->string i)
+                     "0")])
+            (printf "Adding edge from ~a to ~a with label ~a\n" node-id (cdr succ-id) edge-label)
             (set! dot-output (string-append dot-output
-                                            (format "    ~a -> ~a [label=~a];\n" node-id (cdr succ-id) i))))
+                                            (format "    ~a -> ~a [label=~a];\n" node-id (cdr succ-id) edge-label))))
           (printf "No successor block found for block ~a\n" node-id))))
 
   ;; Close the digraph

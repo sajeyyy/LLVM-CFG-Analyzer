@@ -29,7 +29,7 @@
   (define cfg-blocks (build-cfg blocks))
 
   ;; Output the CFG to a DOT file
-  (define output-file "output.dot")
+  (define output-file "main.dot")
   (output-dot-file output-file cfg-blocks)
   (printf "CFG has been output to '~a'.\n" output-file))
 

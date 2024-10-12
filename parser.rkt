@@ -20,8 +20,7 @@
               (printf "Ignoring curly brace: ~a\n" line)  ;; Just log and skip curly brace
               #f)  ;; Return #f for curly braces
 
-            ;; Else, proceed to process the line
-            ;; First check for each pattern using `regexp-match?`
+            ;; Else, proceed to process the line and check for each instruction pattern using `regexp-match?`
             (cond
               ;; Match 'alloca' (e.g., "%ptr = alloca i32")
               [(regexp-match? #px"^\\s*(%\\w+) = alloca (\\w+)$" line)
@@ -258,7 +257,7 @@
                       (set! successors (append successors (list succ-block))))))]
                ;; Else
                [else
-                (printf "Unknown branch instruction format: ~a\n" operands)] )] ;; End of match case for 'br'
+                (printf "Unknown branch instruction format: ~a\n" operands)] )] 
 
             ;; Return instruction doesn't have successors
             [(LLVM-Instruction 'ret _)
@@ -284,8 +283,9 @@
   (define block-order '("entry" "lbl_t" "lbl_f" "end"))
 
   ;; Create a mapping from labels to blocks
-  (define label-to-block (for/list ([block (Function-basic-blocks function)])
-                           (cons (BasicBlock-label block) block)))
+  (define label-to-block
+    (for/list ([block (Function-basic-blocks function)])
+      (cons (BasicBlock-label block) block)))
 
   ;; Assign node IDs to each basic block according to block-order
   (define block-ids
@@ -296,62 +296,38 @@
             (cons (cdr block) (format "Node~a" idx))
             (error "Block with label ~a not found in function ~a" label (Function-name function))))))
 
-  ;; Debug: Print block-ids
-  (printf "block-ids: ~a\n" block-ids)
+  ;; Create a mapping from blocks to node IDs
+  (define block-to-node-id
+    (make-hash block-ids))
 
-  ;; Initialize dot-output with rankdir
-  (define dot-output "digraph {\n    rankdir=TB;\n")
+  ;; Initialize dot-output
+  (define dot-output "\ndigraph {\n")
 
-  ;; Generate the nodes
-  (set! dot-output (string-append dot-output "\n    // Define nodes\n"))
+  ;; For each basic block, generate the node and its edges in the desired order
   (for ([block-id block-ids])
     (define block (car block-id))
     (define node-id (cdr block-id))
-    (printf "Block-id: ~a\n" block-id)
-    (printf "Block: ~a\n" block)
     (unless (BasicBlock? block)
-      (printf "Error: block is not a BasicBlock: ~a\n" block)
       (error "Invalid block detected in generate-dot-content"))
-    (printf "\nGenerating node for block: ~a with node-id: ~a\n" (BasicBlock-label block) node-id)
 
     ;; Generate the node with the block label
     (set! dot-output (string-append dot-output
-                                    (format "    ~a [shape=record,label=\"~a\"]\n" node-id (BasicBlock-label block)))))
+                                    (format "    ~a [shape=record,label=\"~a\"]\n" node-id (BasicBlock-label block))))
 
-  ;; Group nodes by rank
-  (set! dot-output (string-append dot-output "\n    // Group nodes by rank\n"))
-  ;; Node0 at the top rank
-  (set! dot-output (string-append dot-output "    { rank=min; Node0; }\n"))
-  ;; Node1 and Node2 at the same rank
-  (set! dot-output (string-append dot-output "    { rank=same; Node1; Node2; }\n"))
-  ;; Node3 at the bottom rank
-  (set! dot-output (string-append dot-output "    { rank=max; Node3; }\n"))
-
-  ;; Generate the edges
-  (set! dot-output (string-append dot-output "\n    // Define edges\n"))
-  (for ([block-id block-ids])
-    (define block (car block-id))
-    (define node-id (cdr block-id))
-    (printf "Processing block ~a for successors\n" node-id)
-
-    ;; Add edges to successor blocks
+    ;; Generate edges from this block
     (for ([succ (BasicBlock-successors block)] [i (in-naturals)])
-      (define succ-id (assoc succ block-ids))
-      (if succ-id
-          (let ([edge-label
-                 (if (and (equal? (BasicBlock-label block) "entry")
-                          (= (length (BasicBlock-successors block)) 2))
-                     (number->string i)
-                     "0")])
-            (printf "Adding edge from ~a to ~a with label ~a\n" node-id (cdr succ-id) edge-label)
-            (set! dot-output (string-append dot-output
-                                            (format "    ~a -> ~a [label=~a];\n" node-id (cdr succ-id) edge-label))))
-          (printf "No successor block found for block ~a\n" node-id))))
+      (define succ-node-id (hash-ref block-to-node-id succ))
+      (define edge-label
+        (if (and (equal? (BasicBlock-label block) "entry")
+                 (= (length (BasicBlock-successors block)) 2))
+            (number->string i)
+            "0"))
+      (set! dot-output (string-append dot-output
+                                      (format "    ~a -> ~a [label=~a];\n" node-id succ-node-id edge-label)))))
 
   ;; Close the digraph
-  (set! dot-output (string-append dot-output "}\n"))
+  (set! dot-output (string-append dot-output "}\n\n"))
   dot-output)
-
 
 ;; Output the CFG in Graphviz dot format to a file
 (define (output-dot-file filename function)

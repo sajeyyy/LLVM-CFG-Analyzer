@@ -61,7 +61,9 @@ This project is an LLVM Intermediate Representation (IR) Control-Flow Graph (CFG
     `./graph test.ll`
   
 - **Test.ll Example Output**
-    ```cat main.dot
+   
+   - View the dotfile before converting to PNG with `cat main.dot`
+  ```
       digraph {
         Node0 [shape=record,label="entry"]
         Node0 -> Node1 [label=0];
@@ -77,10 +79,4 @@ This project is an LLVM Intermediate Representation (IR) Control-Flow Graph (CFG
   - Visual the Control Flow Graph (Graphviz will convert the output dotfile to a PNG)
     `dot -Tpng main.dot -o cfg.png`
 
-.
-├── ast.rkt               # Defines the AST node structures for LLVM instructions, basic blocks, and functions
-├── main.rkt              # Main entry point for the program and constructs the CFGs
-├── parser.rkt            # Contains the logic for parsing LLVM IR
-├── test.ll               # Example LLVM IR file for testing
-└── README.md             # Documentation
 

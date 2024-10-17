@@ -61,7 +61,7 @@ This project is an LLVM Intermediate Representation (IR) Control-Flow Graph (CFG
     `./graph test.ll`
   
 - **Test.ll Example Output**
-    ``cat main.dot
+    ```cat main.dot
       digraph {
         Node0 [shape=record,label="entry"]
         Node0 -> Node1 [label=0];
@@ -72,7 +72,7 @@ This project is an LLVM Intermediate Representation (IR) Control-Flow Graph (CFG
         Node2 -> Node3 [label=0];
         Node3 [shape=record,label="end"]
         }
-    ``
+    ```
   
   - Visual the Control Flow Graph (Graphviz will convert the output dotfile to a PNG)
     `dot -Tpng main.dot -o cfg.png`

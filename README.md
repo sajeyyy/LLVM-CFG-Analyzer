@@ -79,4 +79,6 @@ This project is an LLVM Intermediate Representation (IR) Control-Flow Graph (CFG
   - Visual the Control Flow Graph (Graphviz will convert the output dotfile to a PNG)
     `dot -Tpng main.dot -o cfg.png`
 
+    ![Control Flow Graph](./main.png)
+
 

@@ -1,0 +1,11 @@
+
+.idea/vcs.xml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/inspectionProfiles/Project_Default.xml
+.idea/llvm-cfg-analyzer.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/workspace.xml
+.DS_Store
+ast.rkt~
+.DS_Store

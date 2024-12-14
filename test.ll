@@ -1,13 +1,20 @@
-define i32 @main(i32 %argc) {
-        %noArgs = icmp eq i32 %argc, 1
-        br i1 %noArgs, label %lbl_t, label %lbl_f
-lbl_t:
-        %varT = add i32 1, 0
-        br label %end
-lbl_f:
-        %varF = add i32 2, 0
-        br label %end
-end:
-        %var = phi i32 [%varT, %lbl_t], [%varF, %lbl_f]
-        ret i32 %var
+define i32 @main() {
+  %aVar = alloca i32
+  store i32 0, ptr %aVar
+  %a1 = load i32, ptr %aVar
+  %ifTruth = icmp ne i32 %a1, 0
+  br i1 %ifTruth, label %ifBody, label %afterIf
+
+ifBody:
+  %secret = call i32 (...) @SOURCE()
+  store i32 %secret, ptr %aVar
+  br label %afterIf
+
+afterIf:
+  %a2 = load i32, ptr %aVar
+  call void @SINK(i32 %a2)
+  ret i32 0
 }
+
+declare i32 @SOURCE(...)
+declare void @SINK(i32)

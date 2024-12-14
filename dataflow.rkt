@@ -78,6 +78,20 @@
   (hash-set! registers lhs tainted)
   (values registers memory))
 
+(define (state-changed? old-state new-state)
+  (define old-reg (car old-state))
+  (define old-mem (cdr old-state))
+  (define new-reg (car new-state))
+  (define new-mem (cdr new-state))
+
+  (define (hashes-differ? h1 h2)
+    (or (not (equal? (hash-keys h1) (hash-keys h2)))
+        (for/or ([k (hash-keys h1)])
+          (not (equal? (hash-ref h1 k #f) (hash-ref h2 k #f))))))
+
+  (or (hashes-differ? old-reg new-reg)
+      (hashes-differ? old-mem new-mem)))
+
 ;; parse-call-fallback if needed
 (define (parse-call-fallback op-string)
   (define-values (callee args) (parse-call op-string))
@@ -158,15 +172,19 @@
   (define initial-registers (make-hash))
   (define initial-memory (make-hash))
   (define worklist (make-queue))
+
+  ;; Enqueue all blocks initially
   (for ([bb (Function-basic-blocks function)])
-    (when (string=? (BasicBlock-label bb) "entry")
-      (set! worklist (queue-enqueue! worklist bb))))
+    (set! worklist (queue-enqueue! worklist bb)))
+
   (define detected-flow? #f)
   (define block-states (make-hash))
+
+  ;; Initialize block states with empty taint sets
   (for ([bb (Function-basic-blocks function)])
     (hash-set! block-states bb (cons (hash-copy initial-registers) (hash-copy initial-memory))))
 
-  ;; Helper functions
+  ;; Helper: Merge states
   (define (merge-states old-state new-state)
     (define old-reg (car old-state))
     (define old-mem (cdr old-state))
@@ -178,6 +196,7 @@
       (when (hash-ref new-mem k #f) (hash-set! old-mem k #t)))
     (cons old-reg old-mem))
 
+  ;; Helper: Analyze a single block
   (define (analyze-block block reg mem)
     (for ([inst (BasicBlock-instructions block)])
       (define-values (new-reg new-mem) (handle-instruction inst reg mem))
@@ -198,9 +217,8 @@
       (for ([succ (BasicBlock-successors block)])
         (define succ-state (hash-ref block-states succ))
         (define merged (merge-states succ-state (cons (hash-copy new-reg) (hash-copy new-mem))))
-        (unless (and (equal? (hash-keys (car succ-state)) (hash-keys (car merged)))
-                     (equal? (hash-keys (cdr succ-state)) (hash-keys (cdr merged))))
-          (hash-set! block-states succ merged)
-          (set! rest-wl (queue-enqueue! rest-wl succ))))
+        ;; Enqueue successor even if no state change, ensuring all blocks are analyzed
+        (hash-set! block-states succ merged)
+        (set! rest-wl (queue-enqueue! rest-wl succ)))
       (loop rest-wl)))
   detected-flow?)

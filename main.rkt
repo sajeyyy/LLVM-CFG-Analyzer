@@ -58,7 +58,7 @@
     (define cfg-func (build-cfg func))
     (define flow? (dataflow-analyze cfg-func))
     (if flow?
-        (printf "FLOW\n")
-        (printf "NO FLOW\n"))))
+        (printf "\nFLOW\n\n")
+        (printf "\nNO FLOW\n\n"))))
 
 (main)

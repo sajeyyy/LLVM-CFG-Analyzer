@@ -23,3 +23,9 @@ clean:
 	rm -f $(EXECUTABLE).dll $(EXECUTABLE).so
 	rm -f main.dot main.png
 
+all: $(EXECUTABLE)
+	@echo "\nRunning test with test.ll...\n"
+	./$(EXECUTABLE) test1.ll
+	./$(EXECUTABLE) test2.ll
+	./$(EXECUTABLE) test3.ll
+

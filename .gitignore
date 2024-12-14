@@ -9,3 +9,7 @@
 .DS_Store
 ast.rkt~
 .DS_Store
+.test.ll
+.graph
+graph
+.DS_Store

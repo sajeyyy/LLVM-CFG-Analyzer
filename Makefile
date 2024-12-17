@@ -1,12 +1,9 @@
 # Makefile for compiling the Racket program into an executable
 
-# Name of the executable
-EXECUTABLE = graph
+EXECUTABLE = graph # Executable Name
+MAIN_RKT = main.rkt # Main Racket file
 
-# Main Racket file
-MAIN_RKT = main.rkt
-
-# Files to include in the compilation
+# Files to include
 SRC_FILES = main.rkt parser.rkt ast.rkt dataflow.rkt
 
 .PHONY: all clean

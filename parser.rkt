@@ -7,19 +7,21 @@
 
 (provide parse-llvm parse-function parse-basic-blocks find-block-by-label parse-llvm-file parse-call)
 
-;; Helper function
-(define (string-blank? line)
+
+;; Check if a line is blank
+(define (line-blank? line)
   (or (not line) (regexp-match? #px"^\\s*$" line)))
 
-;; Parse LLVM instructions
+
+;; Parse LLVM instructions using regular expressions and match statements
 (define (parse-llvm line)
-  (if (string-blank? line)
+  (if (line-blank? line)
       #f
       (begin
         (if (regexp-match? #px"^\\s*[{}]\\s*$" line)
             #f
             (cond
-              ;; Global variable with optional align
+              ;; Global variable
               [(regexp-match? #px"^\\s*@(\\w+)\\s*=\\s*global\\s+(\\w+)\\s+([\\w\\d]+)(,\\s*align\\s+(\\d+))?\\s*$" line)
                (let* ([m (regexp-match #px"^\\s*@(\\w+)\\s*=\\s*global\\s+(\\w+)\\s+([\\w\\d]+)(,\\s*align\\s+(\\d+))?\\s*$" line)]
                       [name (second m)]
@@ -29,7 +31,7 @@
                       [align (if align-str (string->number align-str) #f)])
                  (GlobalVariable name type value align))]
 
-               ;; define line (function start)
+               ;; Define (start of a function)
                [(regexp-match? #px"^\\s*define\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*(#[\\d]+)?\\s*\\{?$" line)
                 (let* ([m (regexp-match #px"^\\s*define\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*(#[\\d]+)?\\s*\\{?$" line)]
                        [ret-type (second m)]
@@ -39,7 +41,7 @@
                   (LLVM-Instruction 'define (list ret-type fname params metadata)))]
 
 
-              ;; declare line
+              ;; Declare
               [(regexp-match? #px"^\\s*declare\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)
                (let* ([m (regexp-match #px"^\\s*declare\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)]
                       [ret-type (second m)]
@@ -47,7 +49,7 @@
                       [params (fourth m)])
                  (ExternalFunction fname ret-type params))]
 
-              ;; load with optional align
+              ;; Load
               [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*load\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)
                (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*load\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)]
                       [lhs (second m)]
@@ -56,7 +58,7 @@
                       [align (if align-str (string->number align-str) #f)])
                  (LLVM-Instruction 'load (list lhs opstring align)))]
 
-              ;; store with optional align
+              ;; Store
               [(regexp-match? #px"^\\s*store\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)
                (let* ([m (regexp-match #px"^\\s*store\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)]
                       [opstring (second m)]
@@ -64,14 +66,13 @@
                       [align (if align-str (string->number align-str) #f)])
                  (LLVM-Instruction 'store (list opstring align)))]
 
-              ;; ret instruction
+              ;; Ret
               [(regexp-match? #px"^\\s*ret\\s+(.*)$" line)
                (let* ([m (regexp-match #px"^\\s*ret\\s+(.*)$" line)]
                       [ops (second m)])
                  (LLVM-Instruction 'ret (list ops)))]
 
-              ;; br instructions
-              ;; conditional
+              ;; Branch (Conditional)
               [(regexp-match? #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)
                (let* ([m (regexp-match #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)]
                       [cond-type (second m)]
@@ -80,7 +81,7 @@
                       [lfalse (fifth m)])
                  (LLVM-Instruction 'br (list cond-type cond-var ltrue lfalse)))]
 
-              ;; unconditional br
+              ;; Branch (Unconditional)
               [(regexp-match? #px"^\\s*br\\s+label\\s+(%\\w+)$" line)
                (let* ([m (regexp-match #px"^\\s*br\\s+label\\s+(%\\w+)$" line)]
                       [lbl (second m)])
@@ -113,7 +114,7 @@
                       [ops (third m)])
                  (LLVM-Instruction 'phi (list lhs ops)))]
 
-              ;; call with function and args
+              ;; call with function and arguements
               [(regexp-match? #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)
                (let* ([m (regexp-match #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)]
                       [lhs (second m)]
@@ -122,14 +123,14 @@
                       [args (fifth m)])
                  (LLVM-Instruction 'call (list lhs rtype fname args)))]
 
-              ;; fallback for call
+              ;; Call
               [(regexp-match? #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(.*)$" line)
                (let* ([m (regexp-match #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(.*)$" line)]
                       [lhs (second m)]
                       [rest (third m)])
                  (LLVM-Instruction 'call (list lhs rest)))]
 
-              ;; alloca with optional align
+              ;; alloca
               [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*alloca\\s+(\\w+)(,\\s*align\\s+(\\d+))?\\s*$" line)
                (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*alloca\\s+(\\w+)(,\\s*align\\s+(\\d+))?\\s*$" line)]
                       [lhs (second m)]
@@ -184,6 +185,7 @@
   (finalize-block)
   (reverse blocks))
 
+
 ;; Helper function to parse call operands like "@callee(arg1, arg2, ...)"
 (define (parse-call op-string)
   (define regex #px"@([\\w.]+)\\((.*)\\)"
@@ -193,12 +195,14 @@
         (define callee (second match))
         (define raw-args (third match))
         (define args-list
-          (if (string-blank? raw-args) '() (map string-trim (string-split raw-args #px","))))
+          (if (line-blank? raw-args) '() (map string-trim (string-split raw-args #px","))))
         (values callee args-list))
       (values "unknown" '())))
 
+
 (define (find-block-by-label label blocks)
   (for/first ([b blocks] #:when (equal? (BasicBlock-label b) label)) b))
+
 
 ;; Parse a single function from lines
 (define (parse-function lines)
@@ -212,6 +216,7 @@
                 [(LLVM-Instruction 'define (list ret-type fname params metadata)) fname]
                 [_ (error "No function name in define")])])
         (Function f-name basic-blocks))))
+
 
 ;; Parse entire LLVM file
 (define (parse-llvm-file lines)

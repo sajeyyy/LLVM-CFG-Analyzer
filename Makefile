@@ -7,7 +7,7 @@ EXECUTABLE = graph
 MAIN_RKT = main.rkt
 
 # Files to include in the compilation
-SRC_FILES = main.rkt parser.rkt ast.rkt
+SRC_FILES = main.rkt parser.rkt ast.rkt dataflow.rkt
 
 .PHONY: all clean
 

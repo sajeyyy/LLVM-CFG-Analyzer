@@ -36,6 +36,7 @@
     (set-BasicBlock-successors! block (reverse successors)))
   function)
 
+
 (define (main)
   (define input-file
     (command-line
@@ -43,6 +44,7 @@
      #:args (input)
      "Provide the LLVM IR input file."
      input))
+
 
   (define lines
     (with-input-from-file input-file
@@ -60,5 +62,6 @@
     (if flow?
         (printf "\nFLOW\n\n")
         (printf "\nNO FLOW\n\n"))))
+
 
 (main)

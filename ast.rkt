@@ -1,6 +1,6 @@
 #lang racket
 
-;; Provide our structures so other files can use them
+;; Provide our structures so other files have access
 (provide
   (struct-out LLVM-Instruction)
   (struct-out BasicBlock)

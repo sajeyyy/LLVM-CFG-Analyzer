@@ -1,0 +1,13 @@
+
+.idea/inspectionProfiles/profiles_settings.xml
+.DS_Store
+.idea/inspectionProfiles/Project_Default.xml
+.idea/llvm-cfg-analyzer.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
+.idea/workspace.xml
+test1.ll
+test2.ll
+test3.ll
+test4.ll

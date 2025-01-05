@@ -7,118 +7,147 @@
 
 (provide parse-llvm parse-function parse-basic-blocks find-block-by-label)
 
-;; Parse LLVM instructions
+
+;; Check if a line is blank or whitespace
+(define (line-blank? line)
+  (or (not line) (regexp-match? #px"^\\s*$" line)))
+
+;; Parses a LLVM instruction using regular expressions and pattern matching
 (define (parse-llvm line)
-  (if (string-blank? line)  ;; Check for empty or blank lines
-      #f  ;; Return #f for blank lines, which can be ignored later
+  (if (line-blank? line)
+      #f
       (begin
-        (printf "\nProcessing line: ~a\n" line) ;; Log the line being processed
-
-        ;; Ignore lines with only curly braces
         (if (regexp-match? #px"^\\s*[{}]\\s*$" line)
-            (begin
-              (printf "Ignoring curly brace: ~a\n" line)  ;; Just log and skip curly brace
-              #f)  ;; Return #f for curly braces
-
-            ;; Else, proceed to process the line and check for each instruction pattern using `regexp-match?`
+            #f
             (cond
-              ;; Match 'alloca' (e.g., "%ptr = alloca i32")
-              [(regexp-match? #px"^\\s*(%\\w+) = alloca (\\w+)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = alloca (\\w+)$" line)]
-                      [lhs (second matches)]
-                      [type (third matches)])
-                 (LLVM-Instruction 'alloca (list lhs type)))]
+              ;; Global variable
+              [(regexp-match? #px"^\\s*@(\\w+)\\s*=\\s*global\\s+(\\w+)\\s+([\\w\\d]+)(,\\s*align\\s+(\\d+))?\\s*$" line)
+               (let* ([m (regexp-match #px"^\\s*@(\\w+)\\s*=\\s*global\\s+(\\w+)\\s+([\\w\\d]+)(,\\s*align\\s+(\\d+))?\\s*$" line)]
+                      [name (second m)]
+                      [type (third m)]
+                      [value (fourth m)]
+                      [align-str (fifth m)]
+                      [align (if align-str (string->number align-str) #f)])
+                 (GlobalVariable name type value align))]
 
-              ;; Match 'getelementpointer' (e.g., "%gep = getelementptr i32, i32* %ptr, i32 0")
-              [(regexp-match? #px"^\\s*(%\\w+) = getelementptr (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = getelementptr (.*)$" line)]
-                      [lhs (second matches)]
-                      [operands (third matches)])
-                 (LLVM-Instruction 'getelementpointer (list lhs operands)))]
+               ;; Define (start of a function)
+               [(regexp-match? #px"^\\s*define\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*(#[\\d]+)?\\s*\\{?$" line)
+                (let* ([m (regexp-match #px"^\\s*define\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*(#[\\d]+)?\\s*\\{?$" line)]
+                       [ret-type (second m)]
+                       [fname (third m)]
+                       [params (fourth m)]
+                       [metadata (fifth m)])
+                  (LLVM-Instruction 'define (list ret-type fname params metadata)))]
 
-              ;; Match 'load' (e.g., "%val = load i32, i32* %ptr")
-              [(regexp-match? #px"^\\s*(%\\w+) = load (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = load (.*)$" line)]
-                      [lhs (second matches)]
-                      [operands (third matches)])
-                 (LLVM-Instruction 'load (list lhs operands)))]
+              ;; Function declaration (External Function)
+              [(regexp-match? #px"^\\s*declare\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)
+               (let* ([m (regexp-match #px"^\\s*declare\\s+(?:dso_local\\s+)?(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)]
+                      [ret-type (second m)]
+                      [fname (third m)]
+                      [params (fourth m)])
+                 (ExternalFunction fname ret-type params))]
 
-              ;; Match 'store' (e.g., "store i32 %val, i32* %ptr")
-              [(regexp-match? #px"^\\s*store (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*store (.*)$" line)]
-                      [operands (second matches)])
-                 (LLVM-Instruction 'store (list operands)))]
+              ;; Load
+              [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*load\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)
+               (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*load\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)]
+                      [lhs (second m)]
+                      [opstring (third m)]
+                      [align-str (fifth m)]
+                      [align (if align-str (string->number align-str) #f)])
+                 (LLVM-Instruction 'load (list lhs opstring align)))]
 
-              ;; Match 'ret' (e.g., "ret i32 %val")
-              [(regexp-match? #px"^\\s*ret (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*ret (.*)$" line)]
-                      [operands (second matches)])
-                 (LLVM-Instruction 'ret (list operands)))]
+              ;; Store
+              [(regexp-match? #px"^\\s*store\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)
+               (let* ([m (regexp-match #px"^\\s*store\\s+(.*?)(,\\s*align\\s+(\\d+))?\\s*$" line)]
+                      [opstring (second m)]
+                      [align-str (fourth m)]
+                      [align (if align-str (string->number align-str) #f)])
+                 (LLVM-Instruction 'store (list opstring align)))]
 
-              ;; Match 'icmp' (e.g., "%cmp = icmp eq i32 %argc, 1")
-              [(regexp-match? #px"^\\s*(%\\w+) = icmp (\\w+) (\\w+) (%\\w+), (%\\w+|\\d+)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = icmp (\\w+) (\\w+) (%\\w+), (%\\w+|\\d+)$" line)]
-                      [lhs (second matches)]
-                      [cond (third matches)]
-                      [type (fourth matches)]
-                      [op1 (fifth matches)]
-                      [op2 (sixth matches)])
+              ;; Return
+              [(regexp-match? #px"^\\s*ret\\s+(.*)$" line)
+               (let* ([m (regexp-match #px"^\\s*ret\\s+(.*)$" line)]
+                      [ops (second m)])
+                 (LLVM-Instruction 'ret (list ops)))]
+
+              ;; Branch (Conditional)
+              [(regexp-match? #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)
+               (let* ([m (regexp-match #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)]
+                      [cond-type (second m)]
+                      [cond-var (third m)]
+                      [ltrue (fourth m)]
+                      [lfalse (fifth m)])
+                 (LLVM-Instruction 'br (list cond-type cond-var ltrue lfalse)))]
+
+              ;; Branch (Unconditional)
+              [(regexp-match? #px"^\\s*br\\s+label\\s+(%\\w+)$" line)
+               (let* ([m (regexp-match #px"^\\s*br\\s+label\\s+(%\\w+)$" line)]
+                      [lbl (second m)])
+                 (LLVM-Instruction 'br (list lbl)))]
+
+              ;; Comparison Functions
+              [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*icmp\\s+(\\w+)\\s+(\\w+)\\s+(%\\w+),\\s+(%\\w+|\\d+)$" line)
+               (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*icmp\\s+(\\w+)\\s+(\\w+)\\s+(%\\w+),\\s+(%\\w+|\\d+)$" line)]
+                      [lhs (second m)]
+                      [cond (third m)]
+                      [type (fourth m)]
+                      [op1 (fifth m)]
+                      [op2 (sixth m)])
                  (LLVM-Instruction 'icmp (list lhs cond type op1 op2)))]
 
-              ;; Match conditional 'br' instruction
-              [(regexp-match? #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)
-               (let* ([matches (regexp-match #px"^\\s*br\\s+(i\\d+)\\s+(%\\w+),\\s+label\\s+(%\\w+),\\s+label\\s+(%\\w+)$" line)]
-                      [cond-type (second matches)]
-                      [cond-var (third matches)]
-                      [label-true (fourth matches)]
-                      [label-false (fifth matches)])
-                 (LLVM-Instruction 'br (list cond-type cond-var label-true label-false)))]
-
-              ;; Match unconditional 'br' instruction
-              [(regexp-match? #px"^\\s*br\\s+label\\s+(%\\w+)$" line)
-               (let* ([matches (regexp-match #px"^\\s*br\\s+label\\s+(%\\w+)$" line)]
-                      [label (second matches)])
-                 (LLVM-Instruction 'br (list label)))]
-
-              ;; Match 'sub', 'div', 'mul', 'add'
-              [(regexp-match? #px"^\\s*(%\\w+) = (add|sub|div|mul) (\\w+) (%\\w+|\\d+), (%\\w+|\\d+)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = (add|sub|div|mul) (\\w+) (%\\w+|\\d+), (%\\w+|\\d+)$" line)]
-                      [lhs (second matches)]
-                      [opcode (third matches)]
-                      [type (fourth matches)]
-                      [op1 (fifth matches)]
-                      [op2 (sixth matches)])
+              ;; Artihmetic: add, sub, mul, div
+              [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*(add|sub|div|mul)\\s+(\\w+)\\s+(%\\w+|\\d+),\\s+(%\\w+|\\d+)$" line)
+               (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*(add|sub|div|mul)\\s+(\\w+)\\s+(%\\w+|\\d+),\\s+(%\\w+|\\d+)$" line)]
+                      [lhs (second m)]
+                      [opcode (third m)]
+                      [type (fourth m)]
+                      [op1 (fifth m)]
+                      [op2 (sixth m)])
                  (LLVM-Instruction (string->symbol opcode) (list lhs type op1 op2)))]
 
-              ;; Match 'phi' (e.g., "%res = phi i32 [%val1, %then], [%val2, %else]")
-              [(regexp-match? #px"^\\s*(%\\w+) = phi (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = phi (.*)$" line)]
-                      [lhs (second matches)]
-                      [operands (third matches)])
-                 (LLVM-Instruction 'phi (list lhs operands)))]
+              ;; Phu
+              [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*phi\\s+(.*)$" line)
+               (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*phi\\s+(.*)$" line)]
+                      [lhs (second m)]
+                      [ops (third m)])
+                 (LLVM-Instruction 'phi (list lhs ops)))]
 
-              ;; Match 'call' (e.g., "%result = call i32 @func(i32 %a)")
-              [(regexp-match? #px"^\\s*(%\\w+) = call (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*(%\\w+) = call (.*)$" line)]
-                      [lhs (second matches)]
-                      [operands (third matches)])
-                 (LLVM-Instruction 'call (list lhs operands)))]
+              ;; Call (With function and Arguements)
+              [(regexp-match? #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)
+               (let* ([m (regexp-match #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(\\w+)\\s+@([\\w.]+)\\((.*)\\)\\s*$" line)]
+                      [lhs (second m)]
+                      [rtype (third m)]
+                      [fname (fourth m)]
+                      [args (fifth m)])
+                 (LLVM-Instruction 'call (list lhs rtype fname args)))]
 
-              ;; Match 'define' (e.g., "define i32 @main(i32 %argc)")
-              [(regexp-match? #px"^\\s*define (.*)$" line)
-               (let* ([matches (regexp-match #px"^\\s*define (.*)$" line)]
-                      [signature (second matches)])
-                 (LLVM-Instruction 'define (list signature)))]
+              ;; Call
+              [(regexp-match? #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(.*)$" line)
+               (let* ([m (regexp-match #px"^\\s*(?:(%\\w+)\\s*=\\s*)?call\\s+(.*)$" line)]
+                      [lhs (second m)]
+                      [rest (third m)])
+                 (LLVM-Instruction 'call (list lhs rest)))]
 
-              ;; Handle unknown instruction with error logging
+              ;; Alloca
+              [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*alloca\\s+(\\w+)(,\\s*align\\s+(\\d+))?\\s*$" line)
+               (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*alloca\\s+(\\w+)(,\\s*align\\s+(\\d+))?\\s*$" line)]
+                      [lhs (second m)]
+                      [type (third m)]
+                      [align-str (fifth m)]
+                      [align (if align-str (string->number align-str) #f)])
+                 (LLVM-Instruction 'alloca (list lhs type align)))]
+
+              ;; GetElementPtr
+              [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*getelementptr\\s+(.*)$" line)
+               (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*getelementptr\\s+(.*)$" line)]
+                      [lhs (second m)]
+                      [operands (third m)])
+                 (LLVM-Instruction 'getelementptr (list lhs operands)))]
+
+              ;; Unsupported/Unknown Instruction
               [else
-               (begin
-                 (printf "Failed to match instruction: ~a\n" line) ;; Log the failed line
-                 (error "Unknown instruction or format: ~a" line))])))))
+               (error "Unknown instruction or format: ~a" line)])))))
 
-;; Helper function to check if a string is blank
-(define (string-blank? line)
-  (or (not line) (regexp-match? #px"^\\s*$" line)))
 
 ;; Parse basic blocks within a function body
 (define (parse-basic-blocks lines)

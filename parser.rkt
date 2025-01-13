@@ -105,7 +105,7 @@
                       [op2 (sixth m)])
                  (LLVM-Instruction (string->symbol opcode) (list lhs type op1 op2)))]
 
-              ;; Phu
+              ;; Phi
               [(regexp-match? #px"^\\s*(%\\w+)\\s*=\\s*phi\\s+(.*)$" line)
                (let* ([m (regexp-match #px"^\\s*(%\\w+)\\s*=\\s*phi\\s+(.*)$" line)]
                       [lhs (second m)]
@@ -158,7 +158,6 @@
   ;; Helper to finalize the current block
   (define (finalize-block)
     (when (and current-block-label (not (null? current-instructions)))
-      (printf "Finalizing block: ~a with instructions: ~a\n" current-block-label current-instructions)
       (set! blocks (cons (BasicBlock current-block-label (reverse current-instructions) '()) blocks)))
     ;; Reset the state variables outside the 'when' block
     (set! current-block-label #f)
@@ -166,19 +165,16 @@
 
   ;; Process each line
   (for ([line lines])
-    (printf "Processing line in basic block: ~a\n" line)
     (cond
       ;; If the line is a label (start of a block)
       [(regexp-match #px"^(\\w+):$" line)
        (finalize-block) ;; Finalize the previous block
        (set! current-instructions '()) ;; Reset instructions for the new block
-       (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))
-       (printf "New block detected: ~a\n" current-block-label)]
+       (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))]
 
       ;; If it's a control flow instruction (end of a block)
       [(regexp-match #px"^\\s*(br|ret)\\b" line)
        (define instruction (parse-llvm line))
-       (printf "Parsed control flow instruction: ~a\n" instruction)
        (when (and instruction (not (void? instruction)))
          (when (not current-block-label)
            (set! current-block-label "entry"))
@@ -188,20 +184,13 @@
       ;; For other instructions
       [else
        (define instruction (parse-llvm line))
-       (printf "Parsed instruction: ~a\n" instruction)
        (when (and instruction (not (void? instruction)))
          (when (not current-block-label)
            (set! current-block-label "entry"))
          (set! current-instructions (cons instruction current-instructions)))]))
 
-  ;; Finalize the last block
-  (printf "Finalizing last block if any.\n")
+  ;; Finalize & Reverse the blocks
   (finalize-block)
-
-  ;; Print the blocks before reversing
-  (printf "Blocks before reverse: ~a\n" blocks)
-
-  (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label (reverse blocks)))
   (reverse blocks))
 
 ;; Find a basic block by its label in a list of blocks
@@ -211,7 +200,6 @@
       block))  ;; Return the first matching block
   (if found-block
       (begin
-        (printf "Found block for label ~a: ~a\n" label (BasicBlock-label found-block))
         found-block)
       (error "Basic block with label ~a not found" label)))
 
@@ -223,9 +211,6 @@
       (let* ([function-name (car lines)]        ;; The first line contains the function definition
              [function-body (cdr lines)]        ;; The remaining lines contain the function body
              [basic-blocks (parse-basic-blocks function-body)]) ;; Parse the basic blocks from the body
-
-        ;; Print Debug Statement
-        (printf "Parsed basic blocks: ~a\n" (map BasicBlock-label basic-blocks))
 
         ;; Reorder basic blocks to correct order
         (define block-order '("entry" "lbl_t" "lbl_f" "end"))

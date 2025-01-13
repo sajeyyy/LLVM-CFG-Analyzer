@@ -7,28 +7,29 @@
          racket/match
          racket/string)
 
-(define mode "cfg")
-(define input-file #f)
-
-;; -------------------------------
-;; Command-line Parsing
-;; -------------------------------
+;;-------------------------------------------
+;; 1) Command-Line
+;;-------------------------------------------
+(define mode "cfg")    ; Default if user doesn't specify --mode
+(define input-file #f) ; We'll store the LLVM IR file path
 
 (command-line
  #:program "LLVM-Analyzer"
 
+ ;; Let user specify once: --mode <cfg|dataflow|both>
  #:once-each
-   [("--mode") m
-        "Set Mode" (set! mode m)]
+ [("--mode") m
+  "Specify which mode to run: cfg, dataflow, or both"
+  (set! mode m)]
 
- ;; Finish clause to parse last argument
- #:args (filename)
- "LLVM IR input file to analyze."
- (set! input-file filename))
+ ;; Then a single positional argument for the IR file
+ #:args (file)
+ "LLVM IR input file to analyze"
+ (set! input-file file))
 
-;; ---------------------------------------
-;; Build CFG
-;; ---------------------------------------
+;;-------------------------------------------
+;; 2) CFG-Building (unchanged from your logic)
+;;-------------------------------------------
 (define (build-cfg function)
   (for ([block (Function-basic-blocks function)])
     (define instructions (BasicBlock-instructions block))
@@ -45,13 +46,16 @@
                 (find-block-by-label label-true (Function-basic-blocks function)))
               (define succ-block-false
                 (find-block-by-label label-false (Function-basic-blocks function)))
-              (when succ-block-true (set! successors (cons succ-block-true successors)))
-              (when succ-block-false (set! successors (cons succ-block-false successors)))]
+              (when succ-block-true
+                (set! successors (cons succ-block-true successors)))
+              (when succ-block-false
+                (set! successors (cons succ-block-false successors)))]
              [(= (length operands) 1)
               (define label (substring (first operands) 1))
               (define succ-block
                 (find-block-by-label label (Function-basic-blocks function)))
-              (when succ-block (set! successors (cons succ-block successors)))]
+              (when succ-block
+                (set! successors (cons succ-block successors)))]
              [else (void)])]
           [(LLVM-Instruction 'ret _)
            (set! successors '())]
@@ -59,30 +63,21 @@
     (set-BasicBlock-successors! block (reverse successors)))
   function)
 
-;; ---------------------------------------
-;; Generate DOT
-;; ---------------------------------------
-(define (generate-dot-content function [block-in (λ(_) '())] [block-out (λ(_) '())])
+;;-------------------------------------------
+;; 3) Dot Generation
+;;   (We create a small helper that outputs the CFG as .dot)
+;;-------------------------------------------
+(define (output-cfg-dot function filename)
   (define blocks (Function-basic-blocks function))
-  (define dot-output "digraph {\n")
+  (define dot "digraph {\n")
 
+  ;; We'll label each block Node0, Node1, etc.
   (for ([blk blocks] [i (in-naturals)])
     (define node-id (format "Node~a" i))
     (define lbl (BasicBlock-label blk))
-
-    ;; Possibly embed dataflow sets if mode is "dataflow" or "both"
-    (define in-str (string-join (block-in blk) ","))
-    (define out-str (string-join (block-out blk) ","))
-    (define node-label
-      (cond
-        [(or (string=? mode "dataflow") (string=? mode "both"))
-         (format "~a\\nin: {~a}\\nout: {~a}" lbl in-str out-str)]
-        [else
-         (format "~a" lbl)]))
-
-    (set! dot-output
-          (string-append dot-output
-                         (format "  ~a [label=\"~a\"];\n" node-id node-label))))
+    (set! dot
+          (string-append dot
+                         (format "  ~a [label=\"~a\"];\n" node-id lbl))))
 
   ;; Edges
   (for ([blk blocks] [i (in-naturals)])
@@ -91,50 +86,55 @@
       (define j (index-of succ blocks))
       (when j
         (define succ-id (format "Node~a" j))
-        (set! dot-output
-              (string-append dot-output
+        (set! dot
+              (string-append dot
                              (format "  ~a -> ~a;\n" node-id succ-id))))))
 
-  (string-append dot-output "}\n"))
+  (set! dot (string-append dot "}\n"))
 
-;; Helper to find a block's index in a list
+  ;; Write to file
+  (call-with-output-file filename
+    (lambda (out) (fprintf out "~a" dot))
+    #:exists 'replace))
+
+;; Helper for indexing
 (define (index-of x lst [i 0])
   (cond
     [(null? lst) #f]
     [(eq? x (car lst)) i]
     [else (index-of x (cdr lst) (add1 i))]))
 
-;; ---------------------------------------
-;; Main Flow
-;; ---------------------------------------
+;;-------------------------------------------
+;; 4) MAIN
+;;-------------------------------------------
 (define (main)
-
-  ;; 1) Parse the input file
+  ;; 1) Parse entire file into (list-of functions, externals, globals)
   (define lines
     (with-input-from-file input-file
       (lambda () (port->lines (current-input-port)))))
+  (define parsed (parse-llvm-file lines))
+  (define functions (first parsed))
+  (define externals (second parsed)) ; unused here
+  (define globals  (third parsed))   ; unused here
 
-  ;; 2) Parse a single function
-  (define the-func (parse-function lines))
+  ;; 2) For each function, build CFG
+  (for ([func functions])
+    (define cfg-func (build-cfg func))
 
-  ;; 3) Build CFG
-  (define cfg-func (build-cfg the-func))
+    ;; If user wants CFG or BOTH, output a .dot for the function
+    (when (or (string=? mode "cfg")
+              (string=? mode "both"))
+      (define dotfile (string-append (Function-name func) ".dot"))
+      (output-cfg-dot cfg-func dotfile)
+      (printf "Wrote CFG to '~a' for function '~a'.\n"
+              dotfile (Function-name func)))
 
-  ;; 4) Possibly do dataflow
-  (define block-in (λ(_)'()))
-  (define block-out (λ(_)'()))
-  (when (or (string=? mode "dataflow")
-            (string=? mode "both"))
-    (define-values (in-sets out-sets) (dataflow-analyze cfg-func))
-    (set! block-in in-sets)
-    (set! block-out out-sets))
-
-  ;; 5) Generate .dot
-  (define dot-str (generate-dot-content cfg-func block-in block-out))
-  (call-with-output-file "main.dot"
-    (lambda (out)
-      (fprintf out "~a" dot-str))
-    #:exists 'replace)
-  (printf "Wrote 'main.dot' for mode '~a'.\n" mode))
+    ;; If user wants dataflow or BOTH, do dataflow, print FLOW or NO FLOW
+    (when (or (string=? mode "dataflow")
+              (string=? mode "both"))
+      (define flow? (dataflow-analyze cfg-func))
+      (if flow?
+          (printf "\nFLOW\n\n")
+          (printf "\nNO FLOW\n\n")))))
 
 (main)

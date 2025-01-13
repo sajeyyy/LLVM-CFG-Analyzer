@@ -5,7 +5,7 @@
          racket/string
          racket/cmdline)
 
-(provide parse-llvm parse-function parse-basic-blocks find-block-by-label)
+(provide parse-llvm parse-function parse-basic-blocks parse-llvm-file parse-call find-block-by-label)
 
 
 ;; Check if a line is blank or whitespace
@@ -149,81 +149,121 @@
                (error "Unknown instruction or format: ~a" line)])))))
 
 
-;; Parse basic blocks within a function body
+;; Parse basic blocks by identifying labels and terminators from a function
 (define (parse-basic-blocks lines)
   (define blocks '())
   (define current-block-label #f)
   (define current-instructions '())
 
-  ;; Helper to finalize the current block
+  ;; Helper that finalizes the block and adds it to the list of blocks
   (define (finalize-block)
     (when (and current-block-label (not (null? current-instructions)))
-      (set! blocks (cons (BasicBlock current-block-label (reverse current-instructions) '()) blocks)))
-    ;; Reset the state variables outside the 'when' block
-    (set! current-block-label #f)
+      (set! blocks (cons (BasicBlock current-block-label (reverse current-instructions) '()) blocks))) ;; Create a new `BasicBlock` and add it to the list
+    (set! current-block-label #f) ;; Reset label and list of instructinos for next block
     (set! current-instructions '()))
 
-  ;; Process each line
+  ;; Iterate over the lines
   (for ([line lines])
     (cond
-      ;; If the line is a label (start of a block)
+      ;; If line is a label, finalize current block
       [(regexp-match #px"^(\\w+):$" line)
-       (finalize-block) ;; Finalize the previous block
-       (set! current-instructions '()) ;; Reset instructions for the new block
-       (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))]
+       (finalize-block)
+       (set! current-instructions '()) ;; Reset instructions
+       (set! current-block-label (second (regexp-match #px"^(\\w+):$" line)))] ;; Set the new label just found
 
-      ;; If it's a control flow instruction (end of a block)
-      [(regexp-match #px"^\\s*(br|ret)\\b" line)
-       (define instruction (parse-llvm line))
-       (when (and instruction (not (void? instruction)))
-         (when (not current-block-label)
-           (set! current-block-label "entry"))
-         (set! current-instructions (cons instruction current-instructions)))
+      ;; If line is a branch or return, parse then finalize the block
+      [(regexp-match? #px"^\\s*(br|ret)\\b" line)
+       (define inst (parse-llvm line))
+       (when inst
+         (when (not current-block-label) (set! current-block-label "entry"))
+         (set! current-instructions (cons inst current-instructions)))
        (finalize-block)]
 
-      ;; For other instructions
+      ;; Else continue adding instructions to the current block
       [else
-       (define instruction (parse-llvm line))
-       (when (and instruction (not (void? instruction)))
-         (when (not current-block-label)
-           (set! current-block-label "entry"))
-         (set! current-instructions (cons instruction current-instructions)))]))
+       (define inst (parse-llvm line))
+       (when inst
+         (when (not current-block-label) (set! current-block-label "entry"))
+         (set! current-instructions (cons inst current-instructions)))]))
 
-  ;; Finalize & Reverse the blocks
-  (finalize-block)
-  (reverse blocks))
+  (finalize-block) ;; Finalize the last block
+  (reverse blocks)) ;; Return a reversed list for correct orders
 
-;; Find a basic block by its label in a list of blocks
+
+;; Parse function call instructions by getting the callee and arguements
+(define (parse-call op-string)
+  (define regex #px"@([\\w.]+)\\((.*)\\)") ;; Match function name and arguements
+  (if (regexp-match regex op-string)
+      (let ([match (regexp-match regex op-string)])
+        (define callee (second match))
+        (define raw-args (third match))
+        (define args-list
+          (if (line-blank? raw-args) '() (map string-trim (string-split raw-args #px","))))
+        (values callee args-list)) ;; Return callee and arguement list
+      (values "unknown" '())))
+
+
+;; Given a label and list of blocks, iterate through the list and return the block with a label match
 (define (find-block-by-label label blocks)
-  (define found-block
-    (for/first ([block blocks] #:when (equal? label (BasicBlock-label block)))
-      block))  ;; Return the first matching block
-  (if found-block
-      (begin
-        found-block)
-      (error "Basic block with label ~a not found" label)))
+  (for/first ([b blocks] #:when (equal? (BasicBlock-label b) label)) b))
 
-;; Parse a function from its lines
+
+;; Parse a single function from lines
 (define (parse-function lines)
-  ;; Check that lines are not empty
   (if (null? lines)
-      (error "No lines to parse.")
-      (let* ([function-name (car lines)]        ;; The first line contains the function definition
-             [function-body (cdr lines)]        ;; The remaining lines contain the function body
-             [basic-blocks (parse-basic-blocks function-body)]) ;; Parse the basic blocks from the body
+      (error "No lines to parse for function.")
+      (let* ([header (car lines)]
+             [body (cdr lines)]
+             [basic-blocks (parse-basic-blocks body)]
+             [f-name
+              (match (parse-llvm header)
+                [(LLVM-Instruction 'define (list ret-type fname params metadata)) fname]
+                [_ (error "No function name in define")])])
+        (Function f-name basic-blocks))))
 
-        ;; Reorder basic blocks to correct order
-        (define block-order '("entry" "lbl_t" "lbl_f" "end"))
-        (define label-to-block (for/list ([block basic-blocks])
-                                 (cons (BasicBlock-label block) block)))
-        (define ordered-blocks
-          (for/list ([label (in-list block-order)])
-            (let ([block (assoc label label-to-block)])
-              (if block
-                  (cdr block)
-                  (error "Block with label ~a not found in function ~a" label function-name)))))
 
-        ;; Return a Function structure with the parsed name and ordered basic blocks
-        (Function function-name ordered-blocks))))
+;; Parse the entire LLVM file
+(define (parse-llvm-file lines)
+  (define functions '())
+  (define external-functions '())
+  (define global-variables '())
+  (define current-function-lines '())
+  (define in-function #f)
+
+  ;; Iterate through all lines of the file
+  (for ([line lines])
+    (cond
+      [(regexp-match? #px"^\\s*define\\s+" line)
+       (set! in-function #t)
+       (set! current-function-lines (list line))]
+
+      [(and in-function (regexp-match? #px"^\\s*\\}\\s*$" line))
+       (set! current-function-lines (append current-function-lines (list line)))
+       (define func (parse-function current-function-lines))
+       (set! functions (cons func functions))
+       (set! current-function-lines '())
+       (set! in-function #f)]
+
+      [in-function
+       (set! current-function-lines (append current-function-lines (list line)))]
+
+      ;; Parse external functions
+      [(regexp-match? #px"^\\s*declare\\s+" line)
+       (define ext (parse-llvm line))
+       (when (ExternalFunction? ext)
+         (set! external-functions (cons ext external-functions)))]
+
+      ;; Parse global variables
+      [(regexp-match? #px"^\\s*@\\w+\\s*=\\s*global\\s+" line)
+       (define glob (parse-llvm line))
+       (when (GlobalVariable? glob)
+         (set! global-variables (cons glob global-variables)))]
+
+      ;; If there are no instructions, do nothing
+      [else
+       (void)]))
+
+  (list (reverse functions) (reverse external-functions) (reverse global-variables))) ;; Reutn list of all parsed components
+
 
 

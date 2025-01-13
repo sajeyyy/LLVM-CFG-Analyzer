@@ -146,7 +146,7 @@
       (lambda ()
         (port->lines (current-input-port)))))
 
-  ;; Parse the function(s) from the input file
+  ;; Parse the functions from the input file
   (define blocks (parse-function lines))
 
   ;; Build the CFG from parsed blocks

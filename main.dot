@@ -1,0 +1,10 @@
+digraph {
+  Node0 [label="entry"];
+  Node1 [label="lbl_t"];
+  Node2 [label="lbl_f"];
+  Node3 [label="end"];
+  Node0 -> Node1;
+  Node0 -> Node2;
+  Node1 -> Node3;
+  Node2 -> Node3;
+}
